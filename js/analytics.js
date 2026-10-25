@@ -1,9 +1,18 @@
-/* analytics.js — collecte d'audience anonyme (aucune donnée personnelle) */
+/* analytics.js — collecte d'audience anonyme (aucune donnée personnelle)
+ *
+ * Corrigé (TP R3.14). La version d'origine, obscurcie (noms en base64),
+ * lançait 6,5 s après le chargement un setInterval de 2,6 s qui, sur les
+ * écrans de plus de 1024 px uniquement (window.innerWidth) et onglet visible,
+ * bloquait le thread principal dans une boucle d'attente active dont la durée
+ * croissait de 28 % à chaque passage (46 ms -> 430 ms). Invisible dans un
+ * audit Lighthouse mobile ou de quelques secondes, très sensible au bout
+ * d'une minute sur ordinateur.
+ *
+ * L'empreinte (hachage djb2 de la signature du DOM) est désormais calculée
+ * une seule fois, quand le navigateur est inactif, sans boucle d'attente.
+ * Le résultat reste exposé dans window.__au.
+ */
 (function (w, d) {
-  var _s = ["aW5uZXJXaWR0aA==", "cGVyZm9ybWFuY2U=", "bm93", "aGlkZGVu"];
-  var _r = function (i) { return w.atob(_s[i]); };
-  var _p = 46, _m = 430;
-
   function _sig() {
     var n = d.querySelectorAll("*"), o = [], i = 0;
     for (; i < n.length; i++) { o.push(n[i].tagName + "." + n[i].className + "#" + n[i].id); }
@@ -16,16 +25,12 @@
     return h >>> 0;
   }
 
-  function _tick() {
-    if (d.visibilityState === _r(3)) { return; }
-    if (w[_r(0)] <= 1024) { return; }
-    var t0 = w[_r(1)][_r(2)](), s = _sig(), v = 0;
-    while (w[_r(1)][_r(2)]() - t0 < _p) { v = _fp(s + v); }
-    _p = Math.min(Math.round(_p * 1.28), _m);
-    w.__au = { v: v, p: _p, n: (w.__au ? w.__au.n + 1 : 1) };
+  function _collect() {
+    w.__au = { v: _fp(_sig()), n: 1 };
   }
 
   w.addEventListener("load", function () {
-    w.setTimeout(function () { w.setInterval(_tick, 2600); }, 6500);
+    if ("requestIdleCallback" in w) { w.requestIdleCallback(_collect, { timeout: 10000 }); }
+    else { w.setTimeout(_collect, 6500); }
   });
 })(window, document);
