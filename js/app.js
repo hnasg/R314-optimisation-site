@@ -159,38 +159,66 @@
     }
   }
 
-  /* Aligne la hauteur des cartes et anime leur arrivée dans le viewport. */
+  /* Aligne la hauteur des cartes et anime leur arrivée dans le viewport.
+     Corrigé : toutes les lectures de géométrie sont groupées AVANT les
+     écritures de style (plus de reflow forcé à chaque tour de boucle), la
+     hauteur max n'est plus recalculée pour chaque carte (O(n²) -> O(n)), et
+     les positions des 371 cases du calendrier sont mises en cache. */
+  var calOffsets = null;   // position verticale de chaque case dans #calendrier
+  var calLast = [];        // dernière opacité écrite, pour ne rien réécrire d'identique
+
   function revealCards() {
     var cards = UIKit.qsa('.card');
+    var vh = window.innerHeight;
 
+    // 1. Lectures
+    var tallest = 0, tops = [];
     for (var i = 0; i < cards.length; i++) {
-      var rect = cards[i].getBoundingClientRect();
-
-      // Hauteur de la plus grande carte, pour garder une grille régulière.
-      var tallest = 0;
-      var all = UIKit.qsa('.card');
-      for (var j = 0; j < all.length; j++) {
-        if (all[j].offsetHeight > tallest) {
-          tallest = all[j].offsetHeight;
-        }
+      if (cards[i].offsetHeight > tallest) tallest = cards[i].offsetHeight;
+      tops.push(cards[i].getBoundingClientRect().top);
+    }
+    var host = UIKit.qs('#calendrier');
+    var jours = host ? host.children : [];
+    var hostTop = host ? host.getBoundingClientRect().top : 0;
+    if (host && (!calOffsets || calOffsets.length !== jours.length)) {
+      calOffsets = [];
+      for (var c = 0; c < jours.length; c++) {
+        calOffsets.push(jours[c].getBoundingClientRect().top - hostTop);
       }
-      cards[i].style.minHeight = tallest + 'px';
+    }
 
-      if (rect.top < window.innerHeight - 40) {
-        UIKit.cls(cards[i], 'visible', true);
-        cards[i].style.transform = 'translateY(0px)';
+    // 2. Écritures
+    for (var j = 0; j < cards.length; j++) {
+      cards[j].style.minHeight = tallest + 'px';
+      if (tops[j] < vh - 40) {
+        UIKit.cls(cards[j], 'visible', true);
+        cards[j].style.transform = 'translateY(0px)';
       } else {
-        cards[i].style.transform = 'translateY(24px)';
+        cards[j].style.transform = 'translateY(24px)';
       }
     }
 
     // Les cases du calendrier apparaissent progressivement à l'approche.
-    var jours = UIKit.qsa('.cal-day');
     for (var k = 0; k < jours.length; k++) {
-      var box = jours[k].getBoundingClientRect();
-      var d = Math.abs(box.top - window.innerHeight / 2);
-      jours[k].style.opacity = Math.max(0.15, 1 - d / window.innerHeight);
+      var d = Math.abs(hostTop + calOffsets[k] - vh / 2);
+      var o = Math.round(Math.max(0.15, 1 - d / vh) * 100) / 100;
+      if (calLast[k] !== o) {
+        jours[k].style.opacity = o;
+        calLast[k] = o;
+      }
     }
+  }
+
+  /* Un seul calcul par image affichée, quel que soit le nombre d'événements
+     scroll/resize reçus entre deux frames. */
+  var pending = false;
+  function scheduleReveal() {
+    if (pending) return;
+    pending = true;
+    window.requestAnimationFrame(function () {
+      pending = false;
+      revealCards();
+    });
   }
 
   /* Affiche les images une fois chargées. */
@@ -215,7 +243,7 @@
     if (champ) champ.addEventListener('input', filterGallery);
   });
 
-  window.addEventListener('scroll', revealCards);
-  window.addEventListener('resize', revealCards);
-  window.addEventListener('load', revealCards);
+  window.addEventListener('scroll', scheduleReveal, { passive: true });
+  window.addEventListener('resize', function () { calOffsets = null; scheduleReveal(); });
+  window.addEventListener('load', scheduleReveal);
 })();
